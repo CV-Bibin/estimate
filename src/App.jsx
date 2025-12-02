@@ -1,307 +1,363 @@
 import React, { useState } from 'react';
 import { 
-  Layout, Plus, Trash2, UploadCloud, FileText, CheckCircle, 
-  ArrowRight, ArrowLeft, Home, Save, Download, Loader2, 
-  FileCode, X, HelpCircle, PenTool, Layers, Type, Maximize,
-  DoorOpen, Grid, Activity
+  Layout, Plus, Trash2, UploadCloud, CheckCircle, 
+  ArrowRight, ArrowLeft, X, Activity, Save,
+  AlertCircle, FileText, Loader2, Info, BrickWall, DoorOpen, Maximize
 } from 'lucide-react';
 
 const ROOM_TYPES = [
   "Living Room", "Dining", "Master Bed", "Bedroom 2", 
-  "Kitchen", "Work Area", "Sitout", "Verandah", "Toilet"
+  "Kitchen", "Work Area", "Sitout", "Verandah", "Toilet", "Porch"
 ];
 
-// --- UI Components ---
+const SYNONYM_MAP = {
+  "living": ["hall", "lounge", "drawing", "sitout", "family", "great"],
+  "hall": ["living", "passage", "lobby", "entrance"],
+  "master": ["mbed", "bed", "bedroom", "suite"],
+  "bedroom": ["bed", "guest", "study", "office", "room"],
+  "bed": ["bedroom", "bdr", "sleep"],
+  "kitchen": ["kit", "cook", "pantry", "utility"],
+  "work": ["utility", "wash", "service"],
+  "dining": ["din", "breakfast", "eating"],
+  "toilet": ["bath", "wc", "restroom", "powder", "wash", "t&b"],
+  "bath": ["toilet", "wc"],
+  "sitout": ["verandah", "porch", "balcony", "deck", "patio"]
+};
 
-const WizardStep = ({ number, title, active }) => (
-  <div className={`flex items-center gap-2 ${active ? 'text-emerald-700 font-bold' : 'text-gray-400'}`}>
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 ${active ? 'bg-emerald-100 border-emerald-600' : 'border-gray-300'}`}>
-      {number}
+const WizardStep = ({ number, title, active, completed }) => (
+  <div className={`flex items-center gap-2 ${active ? 'text-blue-700 font-bold' : completed ? 'text-green-600' : 'text-slate-400'}`}>
+    <div className={`w-8 h-8 rounded-full flex items-center justify-center border-2 transition-colors
+      ${active ? 'bg-blue-100 border-blue-600 text-blue-700' : 
+        completed ? 'bg-green-100 border-green-600 text-green-700' : 'border-slate-300'}`}>
+      {completed ? <CheckCircle className="w-5 h-5" /> : number}
     </div>
     <span className="hidden sm:inline">{title}</span>
-    <ArrowRight className="h-4 w-4 mx-2 text-gray-300" />
+    <ArrowRight className={`h-4 w-4 mx-2 ${completed ? 'text-green-600' : 'text-slate-300'}`} />
   </div>
 );
 
-const CadGuideModal = ({ isOpen, onClose }) => {
-  if (!isOpen) return null;
-  return (
-    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full overflow-hidden">
-        <div className="bg-emerald-800 p-4 flex justify-between items-center text-white">
-          <h3 className="font-bold flex items-center gap-2"><FileCode className="h-5 w-5" /> Drafting Standards</h3>
-          <button onClick={onClose}><X className="h-5 w-5" /></button>
-        </div>
-        <div className="p-6 space-y-4 text-sm">
-            <p>1. <strong>Walls:</strong> Draw parallel lines on layer <code>WALL</code>. (23cm or 15cm apart).</p>
-            <p>2. <strong>Plinth:</strong> Draw one closed polyline on layer <code>PLINTH_AREA</code> (Outer Boundary).</p>
-            <p>3. <strong>Rooms:</strong> Draw closed polylines on <code>ROOM_AREA</code> with Text inside.</p>
-            <p>4. <strong>Openings:</strong> Draw single width lines on <code>DOOR</code> or <code>WINDOW</code>.</p>
-        </div>
-        <div className="p-4 border-t flex justify-end"><button onClick={onClose} className="bg-gray-800 text-white px-4 py-2 rounded">Close</button></div>
-      </div>
-    </div>
-  );
-};
-
-// --- Main App ---
-
 export default function App() {
   const [step, setStep] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [file, setFile] = useState(null);
+  const [unit, setUnit] = useState('m');
+  const [cadRawData, setCadRawData] = useState(null);
   const [projectData, setProjectData] = useState({ floors: [{ id: 1, name: "Ground Floor", rooms: [] }] });
-  const [cadData, setCadData] = useState(null); 
-  const [isUploading, setIsUploading] = useState(false);
-  const [showCadGuide, setShowCadGuide] = useState(false);
-  const [errorMsg, setErrorMsg] = useState(null);
 
-  // --- Handlers ---
-  const addFloor = () => setProjectData({ ...projectData, floors: [...projectData.floors, { id: projectData.floors.length + 1, name: "New Floor", rooms: [] }] });
-  const removeFloor = (id) => setProjectData({ ...projectData, floors: projectData.floors.filter(f => f.id !== id) });
-  const addRoom = (fid, name) => {
-    const updated = projectData.floors.map(f => f.id === fid ? { ...f, rooms: [...f.rooms, { id: Date.now(), name, l: "", b: "" }] } : f);
-    setProjectData({ ...projectData, floors: updated });
-  };
-  const removeRoom = (fid, rid) => {
-    const updated = projectData.floors.map(f => f.id === fid ? { ...f, rooms: f.rooms.filter(r => r.id !== rid) } : f);
-    setProjectData({ ...projectData, floors: updated });
-  };
-  const updateRoomDim = (fid, rid, key, val) => {
-    const updated = projectData.floors.map(f => f.id === fid ? { ...f, rooms: f.rooms.map(r => r.id === rid ? { ...r, [key]: val } : r) } : f);
-    setProjectData({ ...projectData, floors: updated });
-  };
-
-  const handleCadUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  const handleAnalyze = async () => {
+    if (!file) { setError("Please select a DXF file."); return; }
     
-    setIsUploading(true);
-    setErrorMsg(null);
-    setCadData(null); // Clear previous data
-    
+    setLoading(true); setError('');
     const formData = new FormData();
     formData.append('file', file);
+    formData.append('unit', unit);
 
     try {
-      // UPDATED: Used 127.0.0.1 instead of localhost to prevent IPv6 mismatch
-      const response = await fetch('http://127.0.0.1:5000/analyze-cad', {
-        method: 'POST',
-        body: formData
-      });
-      
-      if (!response.ok) {
-        // IMPROVED ERROR HANDLING: Capture exact status code and text from server
-        let errText = await response.text();
-        try {
-            // Try to parse JSON error if possible
-            const errJson = JSON.parse(errText);
-            if (errJson.error) errText = errJson.error;
-        } catch (e) {
-            // If not JSON, use raw text (which might be HTML for 404/500)
-            if (errText.includes("<!DOCTYPE html>")) errText = "Server Error (Check Python Console)";
-        }
-        throw new Error(`Server returned ${response.status}: ${errText}`);
-      }
-      
+      const response = await fetch('http://127.0.0.1:5000/analyze-cad', { method: 'POST', body: formData });
       const data = await response.json();
-      console.log("RAW PYTHON DATA:", data); // Check console for exact response
       
-      if (data.error) throw new Error(data.error);
-
-      setCadData(data); // Store raw data for diagnostics
+      if (!response.ok) throw new Error(data.error || "Analysis failed");
       
-      const cadRooms = data.rooms || [];
+      setCadRawData(data);
+      performMatching(data);
+      setStep(3);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-      // Update Rooms in UI based on Text Matching
-      const updatedFloors = projectData.floors.map((floor, index) => {
-        if (index === 0) { 
-          let updatedUserRooms = floor.rooms.map(uRoom => ({...uRoom}));
-          let availableCadRooms = [...cadRooms];
+  const performMatching = (cadData) => {
+    const cadRoomsPool = [...cadData.rooms];
+    const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-          // Fuzzy Matching Synonyms
-          const ROOM_SYNONYMS = {
-            "master bed": ["bed", "bedroom", "mst"], "bedroom 2": ["bed", "guest"], "kitchen": ["kitchen", "kit"], 
-            "living room": ["hall", "living"], "dining": ["dining"], "toilet": ["bath", "wc", "toilet"]
-          };
+    const getMatchScore = (uName, cName) => {
+      const u = normalize(uName);
+      const c = normalize(cName);
+      if (u === c) return 100;
+      if (u.includes(c) || c.includes(u)) return 80;
+      
+      const uTokens = uName.toLowerCase().split(/\s+/);
+      for (const token of uTokens) {
+        const synonyms = SYNONYM_MAP[token] || [];
+        if (synonyms.some(syn => c.includes(syn))) return 95;
+      }
+      return 0;
+    };
 
-          updatedUserRooms = updatedUserRooms.map(uRoom => {
-            const keys = ROOM_SYNONYMS[uRoom.name.toLowerCase()] || [uRoom.name.toLowerCase()];
-            const matchIdx = availableCadRooms.findIndex(c => keys.some(k => c.name && c.name.toLowerCase().includes(k)));
-            
-            if (matchIdx !== -1) {
-              const match = availableCadRooms[matchIdx];
-              availableCadRooms.splice(matchIdx, 1);
-              return { ...uRoom, l: match.l, b: match.b, source: `CAD: ${match.name}` };
-            }
-            return uRoom;
+    setProjectData(prev => {
+      const updatedFloors = prev.floors.map(floor => {
+        // 1. Match existing user rooms
+        const matchedUserRooms = floor.rooms.map(userRoom => {
+          let bestIdx = -1, bestScore = 0;
+          cadRoomsPool.forEach((cr, i) => {
+            const score = getMatchScore(userRoom.name, cr.name);
+            if (score > 50 && score > bestScore) { bestScore = score; bestIdx = i; }
           });
 
-          // Fill remaining empty user rooms with remaining CAD rooms
-          updatedUserRooms = updatedUserRooms.map(uRoom => {
-            if ((!uRoom.l || uRoom.l === "") && availableCadRooms.length > 0) {
-                const match = availableCadRooms.shift();
-                return { ...uRoom, l: match.l, b: match.b, source: `CAD: Auto` };
-            }
-            return uRoom;
-          });
+          if (bestIdx !== -1) {
+            const match = cadRoomsPool.splice(bestIdx, 1)[0];
+            return { 
+              ...userRoom, 
+              l: match.l, 
+              b: match.b, 
+              area: match.area, 
+              matched: true, 
+              source: `CAD: ${match.name}` 
+            };
+          }
+          return { ...userRoom, matched: false };
+        });
 
-          return { ...floor, rooms: updatedUserRooms };
-        }
-        return floor;
+        // 2. Capture remaining CAD rooms
+        const extraRooms = cadRoomsPool.map(cr => ({
+          id: `cad-extra-${cr.id}`, 
+          name: cr.name, 
+          l: cr.l, 
+          b: cr.b, 
+          area: cr.area, 
+          matched: true, 
+          source: 'Auto-Detected'
+        }));
+
+        return { ...floor, rooms: [...matchedUserRooms, ...extraRooms] };
       });
-      
-      setProjectData({ ...projectData, floors: updatedFloors });
+      return { ...prev, floors: updatedFloors };
+    });
+  };
 
-    } catch (err) { 
-      console.error(err);
-      setErrorMsg(err.message);
-    } 
-    finally { setIsUploading(false); }
+  const addRoom = (fid, name) => {
+    setProjectData(prev => ({
+      ...prev, floors: prev.floors.map(f => f.id === fid ? {...f, rooms: [...f.rooms, { id: Date.now(), name }]} : f)
+    }));
+  };
+
+  const updateRoomDim = (floorId, roomId, field, value) => {
+    setProjectData(prev => ({
+      ...prev,
+      floors: prev.floors.map(f => f.id === floorId ? { 
+        ...f, 
+        rooms: f.rooms.map(r => r.id === roomId ? { 
+          ...r, 
+          [field]: value,
+          area: (field === 'l' || field === 'b') && value && (field === 'l' ? r.b : r.l) 
+            ? (parseFloat(value) * parseFloat(field === 'l' ? r.b : r.l)).toFixed(2) 
+            : r.area
+        } : r) 
+      } : f)
+    }));
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900 pb-24">
-      <div className="bg-emerald-800 text-white p-4 shadow-md sticky top-0 z-50">
-        <div className="max-w-6xl mx-auto flex items-center gap-3"><Layout className="h-6 w-6 text-emerald-300" /><h1 className="text-xl font-bold">Nirman Estimator (Strict Mode)</h1></div>
-      </div>
-
-      <div className="bg-white border-b border-gray-200 mb-8 sticky top-14 z-40">
-        <div className="max-w-6xl mx-auto px-4 py-4 flex gap-8 overflow-x-auto">
-            {[1,2,3,4].map(n => <WizardStep key={n} number={n} title={['Floors','Rooms','Dimensions','Results'][n-1]} active={step >= n} />)}
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-24">
+      {/* HEADER */}
+      <div className="bg-white border-b border-slate-200 sticky top-0 z-50">
+        <div className="max-w-7xl mx-auto px-6 py-4">
+          <div className="flex justify-between items-center mb-6">
+            <div className="flex items-center gap-3">
+              <div className="bg-blue-600 p-2 rounded-lg"><Layout className="h-6 w-6 text-white" /></div>
+              <div><h1 className="text-xl font-bold text-slate-800">Nirman Estimator Pro</h1><p className="text-xs text-slate-500">Strict Layer Standard Mode</p></div>
+            </div>
+            <div className="flex gap-4 overflow-x-auto pb-2">
+              <WizardStep number={1} title="Project Setup" active={step===1} completed={step>1} />
+              <WizardStep number={2} title="CAD Analysis" active={step===2} completed={step>2} />
+              <WizardStep number={3} title="Review" active={step===3} completed={step>3} />
+            </div>
+          </div>
         </div>
       </div>
 
-      <CadGuideModal isOpen={showCadGuide} onClose={() => setShowCadGuide(false)} />
-
-      <div className="max-w-6xl mx-auto px-4">
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        
+        {/* STEP 1: SETUP */}
         {step === 1 && (
-            <div className="grid gap-4 max-w-md mx-auto">
-                <h2 className="text-xl font-bold text-center mb-4">1. Project Setup</h2>
-                {projectData.floors.map(f => (
-                    <div key={f.id} className="p-4 bg-white border rounded shadow flex justify-between">
-                        <span>{f.name}</span>
-                        {f.id > 1 && <button onClick={() => removeFloor(f.id)} className="text-red-500"><Trash2 className="h-4 w-4" /></button>}
-                    </div>
-                ))}
-                <button onClick={addFloor} className="p-3 border-2 border-dashed rounded text-gray-500 flex justify-center gap-2"><Plus /> Add Floor</button>
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 flex gap-3 text-sm text-blue-800">
+              <AlertCircle className="w-5 h-5 shrink-0" />
+              <strong>Standard Layers Required:</strong> WALL, ROOM_AREA, PLINTH_AREA, DOOR, WINDOW.
             </div>
+            {projectData.floors.map(floor => (
+              <div key={floor.id} className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+                <div className="font-bold text-lg mb-4">{floor.name}</div>
+                <div className="flex flex-wrap gap-2 mb-6">
+                  {ROOM_TYPES.map(t => <button key={t} onClick={()=>addRoom(floor.id, t)} className="px-3 py-1 bg-slate-100 rounded-full text-xs hover:bg-slate-200">+ {t}</button>)}
+                </div>
+                <div className="grid md:grid-cols-3 gap-3">
+                  {floor.rooms.map(r => (
+                    <div key={r.id} className="flex justify-between items-center p-3 border rounded bg-slate-50">
+                      <span>{r.name}</span>
+                      <button onClick={() => setProjectData(prev => ({...prev, floors: prev.floors.map(f => f.id===floor.id ? {...f, rooms: f.rooms.filter(x => x.id !== r.id)} : f)}))} className="text-slate-400 hover:text-red-500"><X className="w-4 h-4" /></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <button onClick={()=>setStep(2)} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold">Next Step</button>
+          </div>
         )}
 
+        {/* STEP 2: UPLOAD */}
         {step === 2 && (
-            <div className="grid md:grid-cols-2 gap-6">
-                {projectData.floors.map(f => (
-                    <div key={f.id} className="bg-white p-5 rounded shadow">
-                        <h3 className="font-bold border-b pb-2 mb-4">{f.name}</h3>
-                        <div className="flex flex-wrap gap-2 mb-4">
-                            {ROOM_TYPES.map(t => <button key={t} onClick={() => addRoom(f.id, t)} className="px-3 py-1 bg-gray-100 rounded text-xs">+ {t}</button>)}
-                        </div>
-                        <div className="space-y-2">
-                            {f.rooms.map(r => (
-                                <div key={r.id} className="flex justify-between bg-gray-50 p-2 rounded">
-                                    <span>{r.name}</span>
-                                    <button onClick={() => removeRoom(f.id, r.id)}><X className="h-4 w-4 text-gray-400" /></button>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ))}
+          <div className="max-w-xl mx-auto bg-white p-8 rounded-xl shadow-lg border text-center space-y-6">
+            <UploadCloud className="w-16 h-16 text-blue-600 mx-auto" />
+            <h2 className="text-xl font-bold">Upload Standardized DXF</h2>
+            <input type="file" accept=".dxf" onChange={e => setFile(e.target.files[0])} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"/>
+            <div className="flex justify-center gap-4 items-center">
+              <span>Unit:</span>
+              <select value={unit} onChange={e => setUnit(e.target.value)} className="border p-2 rounded">
+                <option value="m">Meters</option><option value="mm">Millimeters</option><option value="ft">Feet</option>
+              </select>
             </div>
+            {error && <div className="text-red-600 bg-red-50 p-3 rounded">{error}</div>}
+            <button onClick={handleAnalyze} disabled={loading} className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold flex justify-center gap-2">
+              {loading ? <Loader2 className="animate-spin"/> : "Analyze"}
+            </button>
+          </div>
         )}
 
+        {/* STEP 3: REVIEW */}
         {step === 3 && (
-            <div className="space-y-6">
-                <div className="flex justify-between items-center">
-                    <div><h2 className="text-xl font-bold">3. Extraction & Dimensions</h2><p className="text-sm text-gray-500">Upload to extract real values.</p></div>
-                    <div className="flex gap-2 items-center">
-                        <button onClick={() => setShowCadGuide(true)} className="text-sm text-blue-600 underline">Guide</button>
-                        <label className="bg-blue-600 text-white px-4 py-2 rounded cursor-pointer flex gap-2">
-                            {isUploading ? <Loader2 className="animate-spin h-5 w-5" /> : <UploadCloud className="h-5 w-5" />}
-                            <input type="file" accept=".dxf,.dwg" onChange={handleCadUpload} className="hidden" />
-                            {isUploading ? "Analyzing..." : "Upload CAD"}
-                        </label>
+          <div className="space-y-8">
+            
+            {/* BOQ CARDS */}
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-slate-800 text-white p-4 rounded-xl shadow">
+                <div className="text-xs uppercase font-bold text-slate-400">Plinth</div>
+                <div className="text-2xl font-bold">{cadRawData?.boq?.slab_area} m²</div>
+              </div>
+              <div className="bg-white p-4 rounded-xl border shadow-sm">
+                <div className="text-xs uppercase font-bold text-slate-400">Carpet</div>
+                <div className="text-2xl font-bold">{cadRawData?.boq?.carpet_area} m²</div>
+              </div>
+              <div className="bg-white p-4 rounded-xl border shadow-sm">
+                <div className="text-xs uppercase font-bold text-slate-400">Masonry</div>
+                <div className="text-2xl font-bold">{cadRawData?.boq?.masonry_vol} m³</div>
+              </div>
+              <div className="bg-white p-4 rounded-xl border shadow-sm">
+                <div className="text-xs uppercase font-bold text-slate-400">Plaster</div>
+                <div className="text-2xl font-bold">{cadRawData?.boq?.plaster_area} m²</div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              
+              {/* LEFT COL: PROJECT ESTIMATE */}
+              <div className="lg:col-span-2 space-y-6">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-blue-600"/> Project Room List
+                </h3>
+                {projectData.floors.map(floor => (
+                  <div key={floor.id} className="bg-white rounded-xl shadow border overflow-hidden">
+                    <div className="bg-slate-50 p-4 font-bold border-b">{floor.name}</div>
+                    <div className="p-4 space-y-2">
+                      {floor.rooms.map(room => (
+                        <div key={room.id} className="flex flex-col sm:flex-row sm:items-center gap-2 p-3 bg-slate-50 rounded border hover:border-blue-300 transition-colors">
+                          <div className="w-full sm:w-1/3">
+                            <div className="font-bold text-slate-800">{room.name}</div>
+                            {room.source && <div className="text-xs text-green-600 font-medium">{room.source}</div>}
+                          </div>
+                          
+                          <div className="flex-1 grid grid-cols-3 gap-2">
+                            <div>
+                              <label className="text-[10px] text-gray-400 uppercase">Length</label>
+                              <input className="w-full bg-white border rounded px-2 py-1 text-sm font-mono" 
+                                value={room.l||''} placeholder="0.00" onChange={(e) => updateRoomDim(floor.id, room.id, 'l', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-gray-400 uppercase">Breadth</label>
+                              <input className="w-full bg-white border rounded px-2 py-1 text-sm font-mono" 
+                                value={room.b||''} placeholder="0.00" onChange={(e) => updateRoomDim(floor.id, room.id, 'b', e.target.value)} />
+                            </div>
+                            <div>
+                              <label className="text-[10px] text-gray-400 uppercase">Area</label>
+                              <div className="w-full bg-slate-100 border border-transparent rounded px-2 py-1 text-sm font-bold text-right">{room.area || '-'}</div>
+                            </div>
+                          </div>
+                          
+                          <div className="w-8 flex justify-center items-center">
+                            {room.matched ? <CheckCircle className="w-5 h-5 text-green-500" /> : <div className="w-2 h-2 rounded-full bg-gray-300"></div>}
+                          </div>
+                        </div>
+                      ))}
                     </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* RIGHT COL: RAW CAD DATA */}
+              <div className="space-y-6">
+                <h3 className="font-bold text-lg flex items-center gap-2">
+                  <Activity className="w-5 h-5 text-orange-600"/> Detected Assets
+                </h3>
+
+                {/* RAW ROOMS */}
+                <div className="bg-white rounded-xl shadow border overflow-hidden">
+                  <div className="bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 border-b flex justify-between">
+                    <span>Raw Rooms Found</span>
+                    <span>{cadRawData?.rooms?.length || 0}</span>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto">
+                    {cadRawData?.rooms?.map((r, i) => (
+                      <div key={i} className="p-3 border-b text-sm hover:bg-slate-50">
+                        <div className="font-bold">{r.name}</div>
+                        <div className="text-slate-500 text-xs flex gap-2 mt-1">
+                          <span>L: {r.l}</span><span>B: {r.b}</span><span>A: {r.area}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                {errorMsg && (
-                    <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-lg flex items-center gap-3">
-                        <X className="h-5 w-5" />
-                        <div><strong>Extraction Failed:</strong> {errorMsg}</div>
-                    </div>
-                )}
+                {/* OPENINGS - SPLIT INTO DOORS & WINDOWS */}
+                <div className="bg-white rounded-xl shadow border overflow-hidden">
+                  <div className="bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 border-b flex justify-between">
+                    <span>Doors Found</span>
+                    <span>{cadRawData?.openings?.filter(o => o.type === 'door').length || 0}</span>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto">
+                    {cadRawData?.openings?.filter(o => o.type === 'door').map((o, i) => (
+                      <div key={i} className="p-2 border-b text-sm flex justify-between hover:bg-slate-50">
+                        <span>Door</span>
+                        <span className="font-mono font-bold">{o.width} m</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                {/* --- DIAGNOSTICS PANEL (RAW DATA) --- */}
-                {cadData && (
-                    <div className="bg-gray-800 text-white p-4 rounded-lg shadow-lg font-mono text-xs">
-                        <h3 className="text-emerald-400 font-bold mb-3 flex items-center gap-2"><Activity className="h-4 w-4" /> CAD EXTRACTION REPORT (RAW)</h3>
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div className="p-2 bg-gray-700 rounded">
-                                <span className="text-gray-400 block">Outer Wall (23cm)</span>
-                                <span className="text-lg font-bold">{cadData.walls_outer_23_len.toFixed(2)} m</span>
-                            </div>
-                            <div className="p-2 bg-gray-700 rounded">
-                                <span className="text-gray-400 block">Inner Wall (23cm)</span>
-                                <span className="text-lg font-bold">{cadData.walls_inner_23_len.toFixed(2)} m</span>
-                            </div>
-                            <div className="p-2 bg-gray-700 rounded">
-                                <span className="text-gray-400 block">Inner Wall (15cm)</span>
-                                <span className="text-lg font-bold">{cadData.walls_inner_15_len.toFixed(2)} m</span>
-                            </div>
-                            <div className="p-2 bg-gray-700 rounded">
-                                <span className="text-gray-400 block">Openings Detected</span>
-                                <span className="text-lg font-bold text-yellow-400">{cadData.openings.length}</span>
-                            </div>
-                        </div>
-                        <div className="mt-3 pt-3 border-t border-gray-600 text-gray-400">
-                            Debug Log: {cadData.debug_log ? cadData.debug_log.join(' | ') : 'No logs'}
-                        </div>
-                    </div>
-                )}
+                <div className="bg-white rounded-xl shadow border overflow-hidden">
+                  <div className="bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 border-b flex justify-between">
+                    <span>Windows Found</span>
+                    <span>{cadRawData?.openings?.filter(o => o.type === 'window').length || 0}</span>
+                  </div>
+                  <div className="max-h-32 overflow-y-auto">
+                    {cadRawData?.openings?.filter(o => o.type === 'window').map((o, i) => (
+                      <div key={i} className="p-2 border-b text-sm flex justify-between hover:bg-slate-50">
+                        <span>Window</span>
+                        <span className="font-mono font-bold">{o.width} m</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
 
-                {/* --- DETECTED OPENINGS LIST --- */}
-                {cadData && cadData.openings && cadData.openings.length > 0 && (
-                    <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
-                        <h3 className="font-bold text-orange-800 mb-2 flex items-center gap-2">
-                          <DoorOpen className="h-5 w-5"/> Detected Openings
-                        </h3>
-                        <div className="flex flex-wrap gap-2">
-                            {cadData.openings.map((op, idx) => (
-                                <span key={idx} className="bg-white border border-orange-200 px-2 py-1 rounded text-xs text-orange-800 shadow-sm">
-                                    {op.type} ({op.is_outer ? 'Ext' : 'Int'}): <strong>{op.width}m</strong>
-                                </span>
-                            ))}
-                        </div>
-                    </div>
-                )}
+                {/* WALLS */}
+                <div className="bg-white rounded-xl shadow border overflow-hidden">
+                  <div className="bg-slate-50 p-3 text-xs font-bold uppercase text-slate-500 border-b flex justify-between">
+                    <span>Walls Found</span>
+                    <span>{cadRawData?.walls?.length || 0}</span>
+                  </div>
+                  <div className="p-3 text-xs text-slate-500">
+                    <div>Outer: {cadRawData?.summary?.outer_walls_len} m</div>
+                    <div>Inner: {cadRawData?.summary?.inner_walls_len} m</div>
+                  </div>
+                </div>
 
-                {projectData.floors.map(f => (
-                    <div key={f.id} className="bg-white rounded shadow border overflow-hidden">
-                        <div className="bg-gray-50 p-4 font-bold border-b">{f.name}</div>
-                        <div className="p-4 space-y-4">
-                            {f.rooms.map(r => (
-                                <div key={r.id} className="grid grid-cols-12 gap-2 items-center">
-                                    <div className="col-span-4 font-medium text-sm">{r.name} {r.source && <span className="text-[10px] bg-green-100 text-green-700 px-1 rounded">{r.source}</span>}</div>
-                                    <div className="col-span-3"><input type="number" placeholder="L" value={r.l} onChange={e => updateRoomDim(f.id, r.id, 'l', e.target.value)} className="w-full border rounded p-1" /></div>
-                                    <div className="col-span-3"><input type="number" placeholder="B" value={r.b} onChange={e => updateRoomDim(f.id, r.id, 'b', e.target.value)} className="w-full border rounded p-1" /></div>
-                                    <div className="col-span-2 text-xs text-right text-gray-400">{r.l && r.b ? (r.l*r.b).toFixed(2) + ' m²' : '-'}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                ))}
+              </div>
             </div>
-        )}
 
-        {step === 4 && (
-            <div className="text-center py-10 bg-white shadow rounded border">
-                <h2 className="text-xl font-bold mb-2">Extraction Complete</h2>
-                <p className="text-gray-500">Go back to verify dimensions or use the values above for your manual estimation.</p>
-                <p className="text-xs text-gray-400 mt-4">(BOQ Generation temporarily hidden as requested)</p>
-            </div>
+          </div>
         )}
-
-        <div className="fixed bottom-0 left-0 right-0 bg-white p-4 border-t flex justify-between max-w-6xl mx-auto shadow-lg">
-            <button disabled={step===1} onClick={() => setStep(step-1)} className="px-6 py-2 border rounded disabled:opacity-50">Back</button>
-            {step < 4 && <button onClick={() => setStep(step+1)} className="px-6 py-2 bg-emerald-700 text-white rounded">Next</button>}
-        </div>
       </div>
     </div>
   );
