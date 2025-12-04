@@ -7,7 +7,7 @@ import PIL.Image
 logger = logging.getLogger("AI_ENGINE")
 logging.basicConfig(level=logging.INFO)
 
-API_KEY = os.environ.get("GEMINI_API_KEY", "AIzaSyAGrqGdVSENV9PxwCqrVNxpMfhRVLdy5Mc")
+API_KEY = os.environ.get("GEMINI_API_KEY", "XXXXXXXXXXXXXXX")
 
 def get_default_response():
     """Returns a fresh default response structure to avoid shared state issues."""
